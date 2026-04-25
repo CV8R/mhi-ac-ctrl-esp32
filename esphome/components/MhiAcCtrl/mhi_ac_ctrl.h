@@ -241,6 +241,8 @@ public:
     this->ac_config_ = config;
   }
 
+    void set_swing_mode_enabled(bool enabled) { swing_mode_enabled_ = enabled; }
+
     void setup() override
     {
         this->set_supported_custom_fan_modes({ custom_fan_ultra_low });
@@ -392,8 +394,8 @@ public:
           }
         }
 
-        // Update Climate swing_mode from current vane state
-        if(mhi_ac::spi_state.vanes_updown_changed() || mhi_ac::spi_state.vanes_leftright_changed() || first_time) {
+        // Update Climate swing_mode from current vane state (only if swing_mode enabled)
+        if(swing_mode_enabled_ && (mhi_ac::spi_state.vanes_updown_changed() || mhi_ac::spi_state.vanes_leftright_changed() || first_time)) {
           bool ud_swing = (mhi_ac::spi_state.vanes_updown_get() == mhi_ac::ACVanesUD::Swing);
           bool lr_swing = (mhi_ac::spi_state.vanes_leftright_get() == mhi_ac::ACVanesLR::Swing);
           climate::ClimateSwingMode new_swing;
@@ -575,7 +577,7 @@ protected:
           }
         }
 
-        if (call.get_swing_mode().has_value()) {
+        if (swing_mode_enabled_ && call.get_swing_mode().has_value()) {
           auto swing = *call.get_swing_mode();
           bool want_ud_swing = (swing == climate::CLIMATE_SWING_VERTICAL || swing == climate::CLIMATE_SWING_BOTH);
           bool want_lr_swing = (swing == climate::CLIMATE_SWING_HORIZONTAL || swing == climate::CLIMATE_SWING_BOTH);
@@ -599,17 +601,20 @@ protected:
         traits.set_visual_current_temperature_step(0.25);
         traits.set_supported_fan_modes({ CLIMATE_FAN_LOW, CLIMATE_FAN_MEDIUM, CLIMATE_FAN_HIGH, CLIMATE_FAN_AUTO });
         //traits.set_supported_swing_modes({ CLIMATE_SWING_VERTICAL });
-        traits.set_supported_swing_modes({
-          climate::CLIMATE_SWING_OFF,
-          climate::CLIMATE_SWING_VERTICAL,
-          climate::CLIMATE_SWING_HORIZONTAL,
-          climate::CLIMATE_SWING_BOTH
-        });
+        if(swing_mode_enabled_) {
+          traits.set_supported_swing_modes({
+            climate::CLIMATE_SWING_OFF,
+            climate::CLIMATE_SWING_VERTICAL,
+            climate::CLIMATE_SWING_HORIZONTAL,
+            climate::CLIMATE_SWING_BOTH
+          });
+        }
         return traits;
     }
 
     const float minimum_temperature_ { 18.0f };
     const float maximum_temperature_ { 30.0f };
+    bool swing_mode_enabled_ { false };
     // Although the hardware accepts temperatures in steps of 0.5, it
     // effectively is per 1 degree on most units:
     // https://github.com/absalom-muc/MHI-AC-Ctrl/issues/81

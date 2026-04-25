@@ -19,6 +19,7 @@ CONF_USE_LONG_FRAME = "use_long_frame"
 CONF_MOSI_PIN = "mosi_pin"
 CONF_MISO_PIN = "miso_pin"
 CONF_SCLK_PIN = "sclk_pin"
+CONF_SWING_MODE = "swing_mode"
 
 TYPES = [
     CONF_EXTERNAL_TEMPERATURE_SENSOR,
@@ -38,9 +39,10 @@ CONFIG_SCHEMA = cv.All(
             cv.GenerateID(): cv.declare_id(MhiAcCtrl),
             cv.Optional(CONF_EXTERNAL_TEMPERATURE_SENSOR): cv.use_id(sensor.Sensor),
             cv.Optional(CONF_USE_LONG_FRAME, default=True): cv.boolean,
-            cv.Required(CONF_MOSI_PIN): pins.gpio_input_pin_schema,
-            cv.Required(CONF_MISO_PIN): pins.gpio_output_pin_schema,
-            cv.Required(CONF_SCLK_PIN): pins.gpio_input_pin_schema,
+            cv.Optional(CONF_SWING_MODE, default=False): cv.boolean,
+            cv.Optional(CONF_MOSI_PIN): pins.gpio_input_pin_schema,
+            cv.Optional(CONF_MISO_PIN): pins.gpio_output_pin_schema,
+            cv.Optional(CONF_SCLK_PIN): pins.gpio_input_pin_schema,
         }
     ).extend(cv.COMPONENT_SCHEMA)
 )
@@ -64,3 +66,5 @@ async def to_code(config):
     if CONF_EXTERNAL_TEMPERATURE_SENSOR in config:
         sens = await cg.get_variable(config[CONF_EXTERNAL_TEMPERATURE_SENSOR])
         cg.add(var.set_external_room_temperature_sensor(sens))
+
+    cg.add(var.set_swing_mode_enabled(config[CONF_SWING_MODE]))
