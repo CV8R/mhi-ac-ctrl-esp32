@@ -392,6 +392,21 @@ public:
           }
         }
 
+        // Update Climate swing_mode from current vane state
+        if(mhi_ac::spi_state.vanes_updown_changed() || mhi_ac::spi_state.vanes_leftright_changed() || first_time) {
+          bool ud_swing = (mhi_ac::spi_state.vanes_updown_get() == mhi_ac::ACVanesUD::Swing);
+          bool lr_swing = (mhi_ac::spi_state.vanes_leftright_get() == mhi_ac::ACVanesLR::Swing);
+          climate::ClimateSwingMode new_swing;
+          if(ud_swing && lr_swing)       new_swing = climate::CLIMATE_SWING_BOTH;
+          else if(ud_swing)              new_swing = climate::CLIMATE_SWING_VERTICAL;
+          else if(lr_swing)              new_swing = climate::CLIMATE_SWING_HORIZONTAL;
+          else                           new_swing = climate::CLIMATE_SWING_OFF;
+          if(this->swing_mode != new_swing || first_time) {
+            this->swing_mode = new_swing;
+            publish_self_state = true;
+          }
+        }
+
         if(climate_current_temperature_sensor_) {
           if(mhi_ac::spi_state.current_temperature_changed() || std::isnan(climate_current_temperature_sensor_->get_raw_state())) {
             climate_current_temperature_sensor_->publish_state(mhi_ac::spi_state.current_temperature_get());
@@ -559,6 +574,16 @@ protected:
               ESP_LOGW(TAG, "Unrecognised fan mode received");
           }
         }
+
+        if (call.get_swing_mode().has_value()) {
+          auto swing = *call.get_swing_mode();
+          bool want_ud_swing = (swing == climate::CLIMATE_SWING_VERTICAL || swing == climate::CLIMATE_SWING_BOTH);
+          bool want_lr_swing = (swing == climate::CLIMATE_SWING_HORIZONTAL || swing == climate::CLIMATE_SWING_BOTH);
+          // Disable 3D Auto when a standard swing mode is requested
+          mhi_ac::spi_state.three_d_auto_set(false);
+          mhi_ac::spi_state.vanes_updown_set(want_ud_swing ? mhi_ac::ACVanesUD::Swing : mhi_ac::ACVanesUD::CenterDown);
+          mhi_ac::spi_state.vanes_leftright_set(want_lr_swing ? mhi_ac::ACVanesLR::Swing : mhi_ac::ACVanesLR::Center);
+        }
     }
 
     /// Return the traits of this controller.
@@ -574,6 +599,12 @@ protected:
         traits.set_visual_current_temperature_step(0.25);
         traits.set_supported_fan_modes({ CLIMATE_FAN_LOW, CLIMATE_FAN_MEDIUM, CLIMATE_FAN_HIGH, CLIMATE_FAN_AUTO });
         //traits.set_supported_swing_modes({ CLIMATE_SWING_VERTICAL });
+        traits.set_supported_swing_modes({
+          climate::CLIMATE_SWING_OFF,
+          climate::CLIMATE_SWING_VERTICAL,
+          climate::CLIMATE_SWING_HORIZONTAL,
+          climate::CLIMATE_SWING_BOTH
+        });
         return traits;
     }
 

@@ -285,6 +285,7 @@ void SpiState::vanes_updown_set(ACVanesUD new_state) {
       this->miso_frame_[DB0] |= 0x40; // Enable swing
   } else {
       this->miso_frame_[DB1] |= 0x80; // Pos set
+      this->miso_frame_[DB1] &= ~0x30; // Clear position bits before setting
       this->miso_frame_[DB1] |= (static_cast<uint8_t>(new_state)) << 4;
   }
   xSemaphoreGive(miso_semaphore_handle_);
