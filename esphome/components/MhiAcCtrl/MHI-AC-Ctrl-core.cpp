@@ -52,20 +52,40 @@ Energy energy(230);
 SpiState spi_state;
 operation_data::State operation_data_state;
 
+// Called from ISR when RMT detects SPI clock has been idle (inter-frame gap).
+// Only deasserts CS high to end the current transaction and restarts RMT.
+// CS low is NOT asserted here — that is done in spi_post_setup_cb after
+// spi_slave_transmit() has queued the slave, eliminating the race condition
+// where the AC could start clocking before the slave peripheral was ready.
 static bool IRAM_ATTR rmt_on_recv_done_callback(rmt_channel_handle_t channel, const rmt_rx_done_event_data_t *edata, void *user_ctx)
 {
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
-    // Trigger Chip Select low->high->low
+    // Deassert CS (high = deselected) to end current transaction
     esp_rom_gpio_connect_in_signal(GPIO_MATRIX_CONST_ONE_INPUT, spi_periph_signal[RCV_HOST].spics_in, false);
-    esp_rom_gpio_connect_in_signal(GPIO_MATRIX_CONST_ZERO_INPUT, spi_periph_signal[RCV_HOST].spics_in, false);
 
     // Start detecting next SPI clock idle
     rmt_receive(rmt_rx_chan, rmt_buf, sizeof(rmt_buf), &rmt_recv_cfg);
 
+    // Wake the task to process completed frame and queue the next transaction
     vTaskNotifyGiveFromISR(mhi_comm_task_handle, &xHigherPriorityTaskWoken);
 
     return xHigherPriorityTaskWoken;
+}
+
+// Called by SPI slave driver (ISR context) once the slave is set up and ready
+// to receive. Assert CS low here so the AC only starts clocking after the
+// slave peripheral is fully prepared — eliminating the race condition.
+static void IRAM_ATTR spi_post_setup_cb(spi_slave_transaction_t *trans)
+{
+    esp_rom_gpio_connect_in_signal(GPIO_MATRIX_CONST_ZERO_INPUT, spi_periph_signal[RCV_HOST].spics_in, false);
+}
+
+// Called by SPI slave driver (ISR context) after a transaction completes.
+// Deassert CS high to cleanly close the transaction from the slave side.
+static void IRAM_ATTR spi_post_trans_cb(spi_slave_transaction_t *trans)
+{
+    esp_rom_gpio_connect_in_signal(GPIO_MATRIX_CONST_ONE_INPUT, spi_periph_signal[RCV_HOST].spics_in, false);
 }
 
 bool SpiState::snapshot_semaphore_take() {
@@ -565,15 +585,16 @@ void init(const Config& config) {
         .flags = SPI_SLAVE_BIT_LSBFIRST,
         .queue_size = 1,
         .mode = 3,                    //CPOL=1, CPHA=1
-        .post_setup_cb = 0,
-        .post_trans_cb = 0,
+        .post_setup_cb = spi_post_setup_cb,  // asserts CS low when slave is ready
+        .post_trans_cb = spi_post_trans_cb,  // asserts CS high when transaction ends
     };
 
     // initialize SPI slave interface
     err = spi_slave_initialize(RCV_HOST, &buscfg, &slvcfg, SPI_DMA_CH_AUTO);    // can't disable DMA. no comms if you do...
     ESP_ERROR_CHECK(err);
 
-    // Initialise CS to 1 (deselect ourselves as peripheral). RMT interrupt will handle CS after this
+    // Initialise CS to 1 (deselected). spi_post_setup_cb will assert CS low
+    // once the slave is ready for each transaction.
     esp_rom_gpio_connect_in_signal(GPIO_MATRIX_CONST_ONE_INPUT, spi_periph_signal[RCV_HOST].spics_in, false);
 
     // Set up RMT, used to detect clock idle for generating our own chip select signal
